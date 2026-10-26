@@ -6,7 +6,7 @@ Works on **any NVIDIA CUDA GPU**: Colab **T4**, **A100**, **L4**, local cards, e
 
 ## Run on Google Colab
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/support-a100-gpu-cf16/unrestricted_gen.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/main/unrestricted_gen.ipynb)
 
 1. Click **Open in Colab**
 2. **Runtime → Change runtime type → GPU** (T4, **A100**, or L4 — all fine) → Save
