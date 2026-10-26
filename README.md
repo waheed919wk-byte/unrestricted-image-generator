@@ -1,41 +1,31 @@
 # Unrestricted Image Generator
 
-Text-to-image + img2img with **safety checker disabled**. Adult / NSFW OK. **Adults only — no minors.**
+Naya, simple setup. Safety checker **OFF**. Adult content OK. **Adults only.**
 
-## Run on Google Colab (easiest)
+GPU: Colab **A100 / T4 / L4** (koi bhi NVIDIA CUDA)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/improve-unrestricted-generator-cf16/unrestricted_gen.ipynb)
+## Colab (asaan tareeqa)
 
-1. Click **Open in Colab**
-2. **Runtime → Change runtime type → T4 GPU → Save**
-3. **Runtime → Run all**
-4. Wait for a `https://….gradio.live` link and open it
-5. Wait until Status says **Ready**, then Generate
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/fresh-generator-cf16/unrestricted_gen.ipynb)
 
-> If you see “No GPU”, you skipped step 2.  
-> If the link never appears, re-run the last cell. First download is ~6–7 GB.
+1. Link open karo  
+2. **Runtime → Change runtime type → GPU → Save** (A100 rakho agar milay)  
+3. Cell run karo  
+4. `gradio.live` link open karo → Generate  
 
-## Models
+> Purani `Untitled1.ipynb` / Drive wali crashing notebooks mat chalao.
 
-| Model | Notes |
-|-------|--------|
-| SDXL Base | Default, general quality |
-| Pony Realism SDXL | NSFW-friendly |
-| SD 1.5 | Use this if you hit out-of-memory |
-
-## Local (NVIDIA GPU)
+## Local
 
 ```bash
 pip install -r requirements.txt
-# Install CUDA PyTorch from https://pytorch.org if needed
-python unrestricted_gen.py --share
+python app.py --share
 ```
 
-## Troubleshooting
+## Files
 
-| Problem | Fix |
-|---------|-----|
-| `No GPU` / CUDA error | Colab → Runtime → T4 GPU, then Run all |
-| Out of memory (OOM) | Switch model to **SD 1.5**, or lower width/height to 768 |
-| Share link fails | Re-run the launch cell; check Colab is still connected |
-| Stuck on download | Wait; or Runtime → Disconnect and delete runtime → Run all again |
+| File | Kaam |
+|------|------|
+| `unrestricted_gen.ipynb` | Colab notebook |
+| `app.py` | Gradio app |
+| `requirements.txt` | Dependencies |
