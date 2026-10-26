@@ -1,50 +1,41 @@
 # Unrestricted Image Generator
 
-Text-to-image + img2img with **safety checker disabled**. Adult / NSFW content allowed. **Adults only — no minors.**
+Text-to-image + img2img with **safety checker disabled**. Adult / NSFW OK. **Adults only — no minors.**
 
-Built on Diffusers + Gradio. Works on **Google Colab (T4)** or any local NVIDIA GPU.
+## Run on Google Colab (easiest)
 
-## Open in Colab
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/improve-unrestricted-generator-cf16/unrestricted_gen.ipynb)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/main/unrestricted_gen.ipynb)
+1. Click **Open in Colab**
+2. **Runtime → Change runtime type → T4 GPU → Save**
+3. **Runtime → Run all**
+4. Wait for a `https://….gradio.live` link and open it
+5. Wait until Status says **Ready**, then Generate
 
-1. Runtime → Change runtime type → **T4 GPU**
-2. Run the install cell, then the launch cell
-3. Open the public Gradio link
-4. **Load Model** → Generate or Edit
+> If you see “No GPU”, you skipped step 2.  
+> If the link never appears, re-run the last cell. First download is ~6–7 GB.
 
 ## Models
 
 | Model | Notes |
 |-------|--------|
-| SDXL Base | General quality, ~6–7 GB download |
-| Pony Realism SDXL | NSFW-friendly community checkpoint |
-| SD 1.5 | Lighter VRAM; safety checker forced off |
+| SDXL Base | Default, general quality |
+| Pony Realism SDXL | NSFW-friendly |
+| SD 1.5 | Use this if you hit out-of-memory |
 
-## Local (CUDA)
+## Local (NVIDIA GPU)
 
 ```bash
 pip install -r requirements.txt
-# Install CUDA build of PyTorch from https://pytorch.org if needed
+# Install CUDA PyTorch from https://pytorch.org if needed
 python unrestricted_gen.py --share
 ```
 
-Options:
+## Troubleshooting
 
-```bash
-python unrestricted_gen.py --share --port 7860
-python unrestricted_gen.py --preload "SDXL Base (general)"
-```
-
-## Notes
-
-- First run downloads the chosen model weights
-- Free Colab has session time limits
-- One pipeline load shared for txt2img + img2img (saves VRAM vs loading twice)
-- Attention / VAE slicing enabled; xFormers used when available
-
-## Files
-
-- `unrestricted_gen.py` — Gradio app
-- `unrestricted_gen.ipynb` — Colab launcher
-- `requirements.txt` — Python deps
+| Problem | Fix |
+|---------|-----|
+| `No GPU` / CUDA error | Colab → Runtime → T4 GPU, then Run all |
+| Out of memory (OOM) | Switch model to **SD 1.5**, or lower width/height to 768 |
+| Share link fails | Re-run the launch cell; check Colab is still connected |
+| Stuck on download | Wait; or Runtime → Disconnect and delete runtime → Run all again |

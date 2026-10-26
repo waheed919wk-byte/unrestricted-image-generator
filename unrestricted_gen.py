@@ -1,29 +1,45 @@
 #!/usr/bin/env python3
 """
 Unrestricted Text-to-Image + Edit (SDXL / SD1.5)
-Safety checker disabled. Adult content allowed. No minors.
-Requires a CUDA GPU (e.g. Colab T4 or local NVIDIA).
+Safety checker OFF. Adult content allowed. Adults only — no minors.
+
+Colab: Runtime → T4 GPU, then run the notebook (or: python unrestricted_gen.py --share)
 """
 
 from __future__ import annotations
 
 import argparse
 import gc
+import inspect
 import os
-
-import gradio as gr
-import torch
-from diffusers import (
-    StableDiffusionImg2ImgPipeline,
-    StableDiffusionPipeline,
-    StableDiffusionXLImg2ImgPipeline,
-    StableDiffusionXLPipeline,
-)
-from PIL import Image
+import sys
 
 # ---------------------------------------------------------------------------
-# Models (all run with safety filters off)
+# Soft imports so the script can print a clear error if deps are missing
 # ---------------------------------------------------------------------------
+def _die(msg: str, code: int = 1) -> None:
+    print(f"\nERROR: {msg}\n", file=sys.stderr)
+    raise SystemExit(code)
+
+
+try:
+    import torch
+except ImportError:
+    _die("PyTorch not installed. On Colab just run the install cell first.")
+
+try:
+    import gradio as gr
+    from diffusers import (
+        StableDiffusionImg2ImgPipeline,
+        StableDiffusionPipeline,
+        StableDiffusionXLImg2ImgPipeline,
+        StableDiffusionXLPipeline,
+    )
+    from PIL import Image
+except ImportError as e:
+    _die(f"Missing dependency: {e}\nRun: pip install -r requirements.txt")
+
+
 MODELS = {
     "SDXL Base (general)": {
         "id": "stabilityai/stable-diffusion-xl-base-1.0",
@@ -33,11 +49,13 @@ MODELS = {
         "id": "John6666/pony-realism-v21main-sdxl",
         "kind": "sdxl",
     },
-    "SD 1.5 (classic, lighter VRAM)": {
+    "SD 1.5 (lighter VRAM)": {
         "id": "stable-diffusion-v1-5/stable-diffusion-v1-5",
         "kind": "sd15",
     },
 }
+
+DEFAULT_MODEL = "SDXL Base (general)"
 
 DEFAULT_NEGATIVE = (
     "blurry, low quality, worst quality, deformed, ugly, bad anatomy, "
@@ -45,8 +63,13 @@ DEFAULT_NEGATIVE = (
     "watermark, text, signature, child, underage, loli, young"
 )
 
-# Global state
-_state: dict = {"pipe": None, "pipe_i2i": None, "model_key": None, "kind": None}
+_state: dict = {"pipe": None, "pipe_i2i": None, "model_key": None, "kind": None, "device": None}
+
+
+def get_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 def _clear_gpu() -> None:
@@ -59,9 +82,20 @@ def _clear_gpu() -> None:
         torch.cuda.empty_cache()
 
 
-def load_model(model_key: str, status=gr.Progress(track_tqdm=True)):
-    if not torch.cuda.is_available():
-        raise gr.Error("CUDA GPU required. In Colab: Runtime → Change runtime type → T4 GPU.")
+def _pipeline_from_components(cls, pipe):
+    """Build a sibling pipeline sharing weights (filters incompatible kwargs)."""
+    params = inspect.signature(cls.__init__).parameters
+    kwargs = {k: v for k, v in pipe.components.items() if k in params and v is not None}
+    return cls(**kwargs)
+
+
+def load_model(model_key: str, progress=gr.Progress(track_tqdm=True)):
+    device = get_device()
+    if device != "cuda":
+        raise gr.Error(
+            "No GPU detected. In Colab: Runtime → Change runtime type → T4 GPU, "
+            "then Runtime → Run all."
+        )
 
     if model_key not in MODELS:
         raise gr.Error(f"Unknown model: {model_key}")
@@ -69,7 +103,7 @@ def load_model(model_key: str, status=gr.Progress(track_tqdm=True)):
     if _state["model_key"] == model_key and _state["pipe"] is not None:
         return f"Already loaded: {model_key}"
 
-    status(0, desc=f"Loading {model_key}…")
+    progress(0, desc=f"Downloading / loading {model_key}…")
     _clear_gpu()
 
     info = MODELS[model_key]
@@ -77,64 +111,81 @@ def load_model(model_key: str, status=gr.Progress(track_tqdm=True)):
     kind = info["kind"]
     dtype = torch.float16
 
-    if kind == "sdxl":
-        # SDXL has no built-in safety checker; load once and share weights for img2img
-        load_kwargs = dict(
-            torch_dtype=dtype,
-            use_safetensors=True,
-            add_watermarker=False,
-        )
-        try:
-            pipe = StableDiffusionXLPipeline.from_pretrained(
-                model_id, variant="fp16", **load_kwargs
+    try:
+        if kind == "sdxl":
+            load_kwargs = dict(torch_dtype=dtype, use_safetensors=True)
+            # add_watermarker exists on some diffusers versions only
+            try:
+                pipe = StableDiffusionXLPipeline.from_pretrained(
+                    model_id, variant="fp16", add_watermarker=False, **load_kwargs
+                )
+            except TypeError:
+                try:
+                    pipe = StableDiffusionXLPipeline.from_pretrained(
+                        model_id, variant="fp16", **load_kwargs
+                    )
+                except Exception:
+                    pipe = StableDiffusionXLPipeline.from_pretrained(model_id, **load_kwargs)
+            except Exception:
+                # community checkpoints may lack fp16 variant
+                try:
+                    pipe = StableDiffusionXLPipeline.from_pretrained(
+                        model_id, add_watermarker=False, **load_kwargs
+                    )
+                except TypeError:
+                    pipe = StableDiffusionXLPipeline.from_pretrained(model_id, **load_kwargs)
+
+            pipe = pipe.to(device)
+            pipe_i2i = _pipeline_from_components(StableDiffusionXLImg2ImgPipeline, pipe)
+        else:
+            pipe = StableDiffusionPipeline.from_pretrained(
+                model_id,
+                torch_dtype=dtype,
+                safety_checker=None,
+                requires_safety_checker=False,
+                use_safetensors=True,
             )
-        except Exception:
-            pipe = StableDiffusionXLPipeline.from_pretrained(model_id, **load_kwargs)
-        pipe = pipe.to("cuda")
-        pipe_i2i = StableDiffusionXLImg2ImgPipeline(**pipe.components)
-    else:
-        # SD 1.5: explicitly disable the NSFW safety checker
-        pipe = StableDiffusionPipeline.from_pretrained(
-            model_id,
-            torch_dtype=dtype,
-            safety_checker=None,
-            requires_safety_checker=False,
-            use_safetensors=True,
-        )
-        pipe = pipe.to("cuda")
-        pipe_i2i = StableDiffusionImg2ImgPipeline(**pipe.components)
+            pipe = pipe.to(device)
+            pipe_i2i = _pipeline_from_components(StableDiffusionImg2ImgPipeline, pipe)
+    except Exception as e:
+        _clear_gpu()
+        raise gr.Error(
+            f"Failed to load {model_key}: {e}\n"
+            "Try SD 1.5 (lighter VRAM), or Runtime → Disconnect and delete runtime, then retry."
+        ) from e
 
     pipe.enable_attention_slicing()
     pipe_i2i.enable_attention_slicing()
-    try:
-        pipe.enable_vae_slicing()
-        pipe_i2i.enable_vae_slicing()
-    except Exception:
-        pass
-    try:
-        pipe.enable_xformers_memory_efficient_attention()
-        pipe_i2i.enable_xformers_memory_efficient_attention()
-    except Exception:
-        pass
+    for p in (pipe, pipe_i2i):
+        try:
+            p.enable_vae_slicing()
+        except Exception:
+            pass
+        try:
+            p.enable_xformers_memory_efficient_attention()
+        except Exception:
+            pass
 
     _state["pipe"] = pipe
     _state["pipe_i2i"] = pipe_i2i
     _state["model_key"] = model_key
     _state["kind"] = kind
+    _state["device"] = device
 
     vram = torch.cuda.memory_allocated() / 1024**3
-    return f"Loaded {model_key} ({vram:.1f} GB VRAM in use)"
+    return f"Ready: {model_key} ({vram:.1f} GB VRAM)"
 
 
 def _generator(seed: int):
+    device = _state.get("device") or get_device()
     if seed is None or int(seed) < 0:
         return None
-    return torch.Generator(device="cuda").manual_seed(int(seed))
+    return torch.Generator(device=device).manual_seed(int(seed))
 
 
 def _ensure_loaded():
     if _state["pipe"] is None:
-        raise gr.Error("Load a model first (Load Model button).")
+        raise gr.Error("Model not loaded yet. Click Load Model (or wait for auto-load).")
 
 
 def generate_image(
@@ -152,14 +203,13 @@ def generate_image(
         raise gr.Error("Enter a prompt.")
 
     kind = _state["kind"]
-    # SD1.5 prefers multiples of 8 around 512; SDXL around 1024
     w, h = int(width), int(height)
     if kind == "sd15":
-        w = max(384, min(768, w - (w % 8)))
-        h = max(384, min(768, h - (h % 8)))
+        w = max(384, min(768, (w // 8) * 8))
+        h = max(384, min(768, (h // 8) * 8))
     else:
-        w = max(768, min(1280, w - (w % 64)))
-        h = max(768, min(1280, h - (h % 64)))
+        w = max(768, min(1280, (w // 64) * 64))
+        h = max(768, min(1280, (h // 64) * 64))
 
     n = max(1, min(4, int(num_images)))
     images = []
@@ -167,7 +217,6 @@ def generate_image(
 
     for i in range(n):
         s = (base_seed + i) if base_seed is not None else -1
-        gen = _generator(s)
         out = _state["pipe"](
             prompt=prompt,
             negative_prompt=negative_prompt or "",
@@ -175,7 +224,7 @@ def generate_image(
             guidance_scale=float(guidance),
             width=w,
             height=h,
-            generator=gen,
+            generator=_generator(s),
         )
         images.append(out.images[0])
 
@@ -210,25 +259,30 @@ def edit_image(
     return out.images[0]
 
 
-def build_ui() -> gr.Blocks:
+def build_ui(status_text: str | None = None) -> gr.Blocks:
     with gr.Blocks(title="Unrestricted Image Generator") as demo:
         gr.Markdown(
             """
 # Unrestricted Image Generator
-Text-to-image + img2img. **Safety checker OFF.** Adult content allowed.
+Text-to-image + img2img · **Safety checker OFF** · Adult content OK · **Adults only**
 
-**Rules:** adults only — no minors / underage content. Use a GPU (Colab T4 or local CUDA).
+**Colab:** Runtime → **T4 GPU**. If Status is not Ready, click **Load / Switch Model**.
             """
         )
 
         with gr.Row():
             model_dd = gr.Dropdown(
                 choices=list(MODELS.keys()),
-                value=list(MODELS.keys())[0],
+                value=DEFAULT_MODEL,
                 label="Model",
             )
-            load_btn = gr.Button("Load Model", variant="primary")
-        status = gr.Textbox(label="Status", interactive=False, value="No model loaded")
+            load_btn = gr.Button("Load / Switch Model", variant="primary")
+        status = gr.Textbox(
+            label="Status",
+            interactive=False,
+            value=status_text
+            or ("Ready: " + _state["model_key"] if _state.get("pipe") else "Click Load / Switch Model"),
+        )
         load_btn.click(load_model, inputs=[model_dd], outputs=[status])
 
         with gr.Tabs():
@@ -272,38 +326,68 @@ Text-to-image + img2img. **Safety checker OFF.** Adult content allowed.
                     out_e,
                 )
 
-        gr.Markdown(
-            "_Tip: For NSFW realism try **Pony Realism SDXL**. "
-            "On free Colab, unload/reload if you hit OOM; use SD 1.5 for lower VRAM._"
-        )
-
     return demo
 
 
+def preload(model_key: str | None = None) -> str:
+    """Load weights in the notebook/terminal before Gradio starts (clear progress)."""
+    key = model_key or DEFAULT_MODEL
+    print(f"Loading {key}… (first time downloads several GB)")
+
+    class _Prog:
+        def __call__(self, *args, **kwargs):
+            desc = kwargs.get("desc") or (args[1] if len(args) > 1 else "")
+            if desc:
+                print(desc)
+
+    return load_model(key, progress=_Prog())
+
+
 def main():
+    global DEFAULT_MODEL
+
     parser = argparse.ArgumentParser(description="Unrestricted image generator")
     parser.add_argument("--share", action="store_true", help="Create a public Gradio link")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--no-autoload", action="store_true", help="Do not load model on start")
     parser.add_argument(
-        "--preload",
+        "--model",
         choices=list(MODELS.keys()),
-        default=None,
-        help="Load a model at startup",
+        default=DEFAULT_MODEL,
+        help="Default model",
     )
     args = parser.parse_args()
 
-    # Avoid HF symlink warnings in some containers
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
 
-    if args.preload:
-        print(load_model(args.preload))
+    device = get_device()
+    print(f"Device: {device}")
+    if device != "cuda":
+        print(
+            "WARNING: No CUDA GPU. The UI will open, but Load Model will fail "
+            "until you use a GPU runtime (Colab T4)."
+        )
 
-    demo = build_ui()
+    DEFAULT_MODEL = args.model
+
+    status_text = None
+    if not args.no_autoload and device == "cuda":
+        try:
+            status_text = preload(args.model)
+            print(status_text)
+        except Exception as e:
+            print(f"Auto-load failed: {e}")
+            print("UI will still open — use Load / Switch Model.")
+
+    demo = build_ui(status_text=status_text)
+    print("Launching Gradio…")
     demo.queue(max_size=8).launch(
         server_name=args.host,
         server_port=args.port,
         share=args.share,
+        show_error=True,
     )
 
 
