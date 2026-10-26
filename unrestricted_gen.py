@@ -3,7 +3,8 @@
 Unrestricted Text-to-Image + Edit (SDXL / SD1.5)
 Safety checker OFF. Adult content allowed. Adults only — no minors.
 
-Colab: Runtime → T4 GPU, then run the notebook (or: python unrestricted_gen.py --share)
+Colab: Runtime → GPU (T4, A100, L4, …), then run the notebook.
+Or locally: python unrestricted_gen.py --share
 """
 
 from __future__ import annotations
@@ -72,6 +73,21 @@ def get_device() -> str:
     return "cpu"
 
 
+def gpu_info() -> str:
+    if not torch.cuda.is_available():
+        return "No CUDA GPU"
+    props = torch.cuda.get_device_properties(0)
+    name = torch.cuda.get_device_name(0)
+    total_gb = props.total_memory / 1024**3
+    return f"{name} ({total_gb:.0f} GB)"
+
+
+def gpu_total_gb() -> float:
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.get_device_properties(0).total_memory / 1024**3
+
+
 def _clear_gpu() -> None:
     _state["pipe"] = None
     _state["pipe_i2i"] = None
@@ -93,8 +109,8 @@ def load_model(model_key: str, progress=gr.Progress(track_tqdm=True)):
     device = get_device()
     if device != "cuda":
         raise gr.Error(
-            "No GPU detected. In Colab: Runtime → Change runtime type → T4 GPU, "
-            "then Runtime → Run all."
+            "No GPU detected. In Colab: Runtime → Change runtime type → "
+            "GPU (T4, A100, L4, or any NVIDIA) → Save, then Run all."
         )
 
     if model_key not in MODELS:
@@ -172,8 +188,8 @@ def load_model(model_key: str, progress=gr.Progress(track_tqdm=True)):
     _state["kind"] = kind
     _state["device"] = device
 
-    vram = torch.cuda.memory_allocated() / 1024**3
-    return f"Ready: {model_key} ({vram:.1f} GB VRAM)"
+    used = torch.cuda.memory_allocated() / 1024**3
+    return f"Ready: {model_key} on {gpu_info()} — using {used:.1f} GB"
 
 
 def _generator(seed: int):
@@ -208,8 +224,9 @@ def generate_image(
         w = max(384, min(768, (w // 8) * 8))
         h = max(384, min(768, (h // 8) * 8))
     else:
-        w = max(768, min(1280, (w // 64) * 64))
-        h = max(768, min(1280, (h // 64) * 64))
+            cap = 1536 if gpu_total_gb() >= 24 else 1280
+            w = max(768, min(cap, (w // 64) * 64))
+            h = max(768, min(cap, (h // 64) * 64))
 
     n = max(1, min(4, int(num_images)))
     images = []
@@ -266,9 +283,13 @@ def build_ui(status_text: str | None = None) -> gr.Blocks:
 # Unrestricted Image Generator
 Text-to-image + img2img · **Safety checker OFF** · Adult content OK · **Adults only**
 
-**Colab:** Runtime → **T4 GPU**. If Status is not Ready, click **Load / Switch Model**.
+**Colab:** Runtime → **GPU** (T4 / **A100** / L4 all work). If Status is not Ready, click **Load / Switch Model**.
             """
         )
+
+        # A100 (40GB+) can push higher resolution than T4
+        max_side = 1536 if gpu_total_gb() >= 24 else 1280
+        default_side = 1024
 
         with gr.Row():
             model_dd = gr.Dropdown(
@@ -298,8 +319,8 @@ Text-to-image + img2img · **Safety checker OFF** · Adult content OK · **Adult
                     guidance = gr.Slider(1, 15, value=7, step=0.5, label="Guidance")
                     num_images = gr.Slider(1, 4, value=1, step=1, label="Images")
                 with gr.Row():
-                    width = gr.Slider(512, 1280, value=1024, step=64, label="Width")
-                    height = gr.Slider(512, 1280, value=1024, step=64, label="Height")
+                    width = gr.Slider(512, max_side, value=default_side, step=64, label="Width")
+                    height = gr.Slider(512, max_side, value=default_side, step=64, label="Height")
                     seed = gr.Number(value=-1, label="Seed (−1 = random)", precision=0)
                 btn = gr.Button("Generate", variant="primary")
                 out = gr.Gallery(label="Result", columns=2, height=512)
@@ -363,11 +384,11 @@ def main():
     os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
 
     device = get_device()
-    print(f"Device: {device}")
+    print(f"Device: {device} | {gpu_info()}")
     if device != "cuda":
         print(
             "WARNING: No CUDA GPU. The UI will open, but Load Model will fail "
-            "until you use a GPU runtime (Colab T4)."
+            "until you use a GPU runtime (Colab: T4, A100, L4, …)."
         )
 
     DEFAULT_MODEL = args.model

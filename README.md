@@ -2,18 +2,21 @@
 
 Text-to-image + img2img with **safety checker disabled**. Adult / NSFW OK. **Adults only — no minors.**
 
-## Run on Google Colab (easiest)
+Works on **any NVIDIA CUDA GPU**: Colab **T4**, **A100**, **L4**, local cards, etc.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/improve-unrestricted-generator-cf16/unrestricted_gen.ipynb)
+## Run on Google Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/waheed919wk-byte/unrestricted-image-generator/blob/cursor/support-a100-gpu-cf16/unrestricted_gen.ipynb)
 
 1. Click **Open in Colab**
-2. **Runtime → Change runtime type → T4 GPU → Save**
-3. **Runtime → Run all**
+2. **Runtime → Change runtime type → GPU** (T4, **A100**, or L4 — all fine) → Save
+3. Run the cell
 4. Wait for a `https://….gradio.live` link and open it
-5. Wait until Status says **Ready**, then Generate
+5. When Status says **Ready**, Generate
 
-> If you see “No GPU”, you skipped step 2.  
-> If the link never appears, re-run the last cell. First download is ~6–7 GB.
+> A100 is better than T4 (more VRAM, faster). You do **not** need to switch to T4.  
+> If you see “No GPU”, step 2 was skipped.  
+> First download is ~6–7 GB.
 
 ## Models
 
@@ -21,7 +24,9 @@ Text-to-image + img2img with **safety checker disabled**. Adult / NSFW OK. **Adu
 |-------|--------|
 | SDXL Base | Default, general quality |
 | Pony Realism SDXL | NSFW-friendly |
-| SD 1.5 | Use this if you hit out-of-memory |
+| SD 1.5 | Use on low VRAM if you hit OOM |
+
+On **A100** (24GB+), the UI allows up to **1536×1536**.
 
 ## Local (NVIDIA GPU)
 
@@ -35,7 +40,7 @@ python unrestricted_gen.py --share
 
 | Problem | Fix |
 |---------|-----|
-| `No GPU` / CUDA error | Colab → Runtime → T4 GPU, then Run all |
-| Out of memory (OOM) | Switch model to **SD 1.5**, or lower width/height to 768 |
-| Share link fails | Re-run the launch cell; check Colab is still connected |
-| Stuck on download | Wait; or Runtime → Disconnect and delete runtime → Run all again |
+| `No GPU` / CUDA error | Runtime → GPU (A100/T4/L4), then re-run |
+| Session crashed | You may be on the wrong notebook — use the Colab link above, not Untitled Drive notebooks that call `os.kill` |
+| Out of memory (OOM) | Switch to **SD 1.5**, or lower width/height |
+| Share link fails | Re-run the cell; keep the Colab tab open |
